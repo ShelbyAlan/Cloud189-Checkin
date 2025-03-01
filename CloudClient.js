@@ -6,6 +6,7 @@ const url_1 = __importDefault(require("url"));
 const node_jsencrypt_1 = __importDefault(require("node-jsencrypt"));
 const crypto_1 = __importDefault(require("crypto"));
 const got_1 = __importDefault(require("got"));
+const { console } = require("inspector");
 const tough_cookie_1 = require("tough-cookie");
 const xml2js = require('xml2js');
 
@@ -157,7 +158,6 @@ class CloudClient {
     // 获取 API 数据
     fetchAPI = (task) => {
         const q = url_1.default.parse(task, true);
-        config.log(this.cookieJar)
         return got_1.default
             .get(task, {
                 headers: Object.assign(Object.assign({}, headers), { Host: q.host }),
@@ -194,6 +194,14 @@ class CloudClient {
         this.cookieJar = tough_cookie_1.CookieJar.fromJSON(a.cookieJar)
     }
 
+    // 设置 Cookie 映射
+    cleanCookie() {
+        this.accessToken = null
+        this.username = null
+        this.password = null
+        this.cookieJar = null
+    }
+
     // 获取用户大小信息
     getUserSizeInfo() {
         return got_1.default
@@ -206,18 +214,13 @@ class CloudClient {
             .json();
     }
 
-    cookie_is_believe() {
-        return got_1.default
-            .get("https://cloud.189.cn/api/portal/getUserSizeInfo.action", {
-                headers: {
-                    Accept: "application/json;charset=UTF-8",
-                },
-                cookieJar: this.cookieJar,
-            }).then(r => {
-                return true
-            }).catch(e => {
-                return false
-            })
+    async cookie_is_believe() {
+        try{
+            await this.getUserSizeInfo()
+            return true
+          }catch(e){
+            return false
+          }
     }
 
     // 用户签到
@@ -255,7 +258,6 @@ class CloudClient {
         let url = "https://api.cloud.189.cn/open/family/manage/addMember.action"
         const { familyInfoResp } = await this.getFamilyList();
         let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId;
-        console.log(familyId)
         const time = String(Date.now());
         const signature = this._getSignature({
             AccessToken: this.accessToken,
@@ -291,6 +293,68 @@ class CloudClient {
             .catch(error => {
                 console.error('邀请失败:', error.message);
             });
+    }
+
+    //删除我指定的家庭云成员
+    async deleteMyFamilyUser(account) {
+        console.log("asd")
+
+        let url = "https://api.cloud.189.cn/open/family/manage/deleteMember.action"
+        const { familyInfoResp } = await this.getFamilyList();
+        let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId || null;
+
+        let {familyMemberInfoResp} = await this.getMyFamilyUsers()
+
+        let userId = familyMemberInfoResp.find((f) => f.account == account).userId;
+
+        const time = String(Date.now());
+        const signature = this._getSignature({
+            AccessToken: this.accessToken,
+            Timestamp: time,
+            "familyId": familyId,
+            "userId": userId
+        });
+        let payload = {
+            "familyId": familyId,
+            "userId": userId
+        }
+        return got_1.default
+            .post(url, {
+                headers: {
+                    "Sign-Type": "1",
+                    signature: signature,
+                    timestamp: time,
+                    accesstoken: this.accessToken,
+                    Accept: "application/json;charset=UTF-8"
+                },
+                form: payload,
+                cookieJar: this.cookieJar,
+            }).json()
+    }
+
+    async getMyFamilyUsers(){
+        const { familyInfoResp } = await this.getFamilyList();
+        let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId;
+        console.error(familyId)
+        console.log(familyId)
+        const time = String(Date.now());
+        let url = `https://api.cloud.189.cn/open/family/manage/getMemberList.action?familyId=${familyId}`
+        const signature = this._getSignature({
+            AccessToken: this.accessToken,
+            Timestamp: time,
+            "familyId": familyId,
+        });
+        return got_1.default
+            .get(url, {
+                headers: {
+                    "Sign-Type": "1",
+                    signature: signature,
+                    timestamp: time,
+                    accesstoken: this.accessToken,
+                    Accept: "application/json;charset=UTF-8"
+                },
+                cookieJar: this.cookieJar,
+            }).json()
     }
 
     async addUserToFamily(familyId, invite_account) {//家庭云ID 邀请你的手机号码
