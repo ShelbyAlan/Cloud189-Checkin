@@ -28,8 +28,12 @@ const logger = log4js.getLogger();
 const mask = (s, start, end) => s.split("").fill("*", start, end).join("");
 
 const doTask = async (cloudClient) => {
-  const result = [];
-  const signPromises1 = [];
+
+  let timeout = 40000; // 40秒
+  let abortController = new AbortController(); // 创建 AbortController
+
+  let result = [];
+  let signPromises1 = [];
   let getSpace = [`${firstSpace}签到个人云获得(M)`];
 
   if (env.private_only_first == false || i == 1) {
@@ -44,19 +48,31 @@ const doTask = async (cloudClient) => {
         }
       })());
     }
-    await Promise.all(signPromises1);
-    if (getSpace.length == 1) getSpace.push(" 0");
-    result.push(getSpace.join(""));
   }
+  //超时中断
+  try {
+    await Promise.race([Promise.all(signPromises1), new Promise((_, reject) => {
+      setTimeout(() => {
+        abortController.abort(); // 取消任务
+        reject(new Error("Task timed out after 40 seconds"));
+      }, timeout);
+    })]);
+  } catch (error) {
+    console.error(error.message); // 输出超时信息
+  }
+  if (getSpace.length == 1) getSpace.push(" 0");
+  result.push(getSpace.join(""));
 
-  const signPromises2 = [];
+
+  abortController = new AbortController(); // 创建 AbortController
+  signPromises1 = []
   getSpace = [`${firstSpace}获得(M)`];
   const { familyInfoResp } = await cloudClient.getFamilyList();
   if (familyInfoResp) {
     const family = familyInfoResp.find((f) => f.familyId == FAMILY_ID) || familyInfoResp[0];
     result.push(`${firstSpace}开始签到家庭云 ID: ${family.familyId}`);
     for (let i = 0; i < family_threadx; i++) {
-      signPromises2.push((async () => {
+      signPromises1.push((async () => {
         try {
           const res = await cloudClient.familyUserSign(family.familyId);
           if (!res.signStatus) {
@@ -67,8 +83,19 @@ const doTask = async (cloudClient) => {
         }
       })());
     }
-    await Promise.all(signPromises2);
-    if(getSpace.length == 1) getSpace.push(" 0");
+    //超时中断
+    try {
+      await Promise.race([Promise.all(signPromises1), new Promise((_, reject) => {
+        setTimeout(() => {
+          abortController.abort(); // 取消任务
+          reject(new Error("Task timed out after 40 seconds"));
+        }, timeout);
+      })]);
+    } catch (error) {
+      console.error(error.message); // 输出超时信息
+    }
+
+    if (getSpace.length == 1) getSpace.push(" 0");
     result.push(getSpace.join(""));
   }
   return result;
@@ -157,12 +184,12 @@ let userNameInfo;
 const main = async () => {
   let accounts
 
-  if(fs.existsSync(filePath)){
+  if (fs.existsSync(filePath)) {
     const readSerializedMap = fs.readFileSync(filePath, 'utf-8'); // 读取文件内容
     // 反序列化字符串为 Map 对象
-    try{
+    try {
       CookiesMap = new Map(JSON.parse(readSerializedMap));
-    }catch(e){
+    } catch (e) {
       console.error(e)
     }
   }
@@ -183,23 +210,23 @@ const main = async () => {
 
         logger.log(`${(i - 1) / 2 + 1}.账户 ${userNameInfo} 开始执行`);
 
-        let gg=`${firstSpace}`
-        
-        if(CookiesMap.has(userName)){
+        let gg = `${firstSpace}`
+
+        if (CookiesMap.has(userName)) {
           cloudClient.setCookieMap(CookiesMap.get(userName))
-          gg+=`本地有储存此账号cookie`
-        }else{
-          gg+=`本地没有储存此账号cookie`          
+          gg += `本地有储存此账号cookie`
+        } else {
+          gg += `本地没有储存此账号cookie`
         }
 
         let cookie_is_believe = await cloudClient.cookie_is_believe()
-        if(!cookie_is_believe){
+        if (!cookie_is_believe) {
           cloudClient._setLogin(userName, password)
           await cloudClient.login();
           CookiesMap.set(userName, cloudClient.getCookieMap())
-          gg+=` 失效重新登录`           
-        }else{
-          gg+=` 并且有效`          
+          gg += ` 失效重新登录`
+        } else {
+          gg += ` 并且有效`
         }
         logger.log(gg)
 
@@ -208,7 +235,7 @@ const main = async () => {
         const result = await doTask(cloudClient);
         result.forEach((r) => logger.log(r));
 
-        let { cloudCapacityInfo: cloudCapacityInfo2 , familyCapacityInfo: familyCapacityInfo2 } = await cloudClient.getUserSizeInfo();
+        let { cloudCapacityInfo: cloudCapacityInfo2, familyCapacityInfo: familyCapacityInfo2 } = await cloudClient.getUserSizeInfo();
 
         if (i == 1) {
           firstUserName = userName
@@ -219,7 +246,6 @@ const main = async () => {
         //重新获取主账号的空间信息
         cloudClient.setCookieMap(CookiesMap.get(firstUserName))
         const { familyCapacityInfo } = await cloudClient.getUserSizeInfo();
-        
 
         logger.log(
           `${firstSpace}实际：个人容量+ ${(cloudCapacityInfo2.totalSize - cloudCapacityInfo0.totalSize) / 1024 / 1024}M, 家庭容量+ ${(familyCapacityInfo.totalSize - familyCapacitySize2) / 1024 / 1024}M`
@@ -245,15 +271,15 @@ const main = async () => {
     logger.log("");
 
   }
-  
-  const serializedMap = JSON.stringify(Array.from(CookiesMap),null, 2);
+
+  const serializedMap = JSON.stringify(Array.from(CookiesMap), null, 2);
   fs.writeFileSync(filePath, serializedMap, 'utf-8'); // 写入文件
 
 };
 
 (async () => {
   try {
-    if(env.tyys == "") {
+    if (env.tyys == "") {
       logger.error("没有设置tyys环境变量")
       return
     }

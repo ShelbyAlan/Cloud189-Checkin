@@ -31,6 +31,7 @@ class CloudClient {
     //设置登录账号密码
     _setLogin(username, password) {
         this.accessToken = ""; // 私有变量
+        this.cookie = ""; // 私有变量
         this.username = username;
         this.password = password;
         this.cookieJar = new tough_cookie_1.CookieJar();
@@ -150,6 +151,15 @@ class CloudClient {
                 })
                 .catch((e) => reject(e));
         });
+
+        //save cookie
+        let cookies = this.cookieJar.toJSON()["cookies"];
+        for (let i = 0; i < cookies.length; i++) {
+            if (cookies[i].key === 'COOKIE_LOGIN_USER') {
+                this.cookie = `COOKIE_LOGIN_USER=${cookies[i].value}`;
+                break;
+            }
+        }
         const { sessionKey } = await this.getUserBriefInfo();
         const { accessToken } = await this.getAccessTokenBySsKey(sessionKey);
         this.accessToken = accessToken;
@@ -160,28 +170,17 @@ class CloudClient {
         const q = url_1.default.parse(task, true);
         return got_1.default
             .get(task, {
-                headers: Object.assign(Object.assign({}, headers), { Host: q.host }),
-                cookieJar: this.cookieJar,
+                headers: Object.assign(Object.assign({}, headers), { Host: q.host , cookie: this.cookie }),
             })
             .json();
     };
 
     // 获取 Cookie 映射
     getCookieMap() {
-        let cookies = this.cookieJar.toJSON()["cookies"];
-        let cookie;
-        for (let i = 0; i < cookies.length; i++) {
-            if (cookies[i].key === 'COOKIE_LOGIN_USER') {
-                cookie = cookies[i].value;
-                break;
-            }
-        }
         const a = {
             account: this.username,
-            password: this.password,
             accesstoken: this.accessToken,
-            cookie: `COOKIE_LOGIN_USER=${cookie}`,
-            cookieJar: this.cookieJar.toJSON(),
+            cookie: this.cookie,
         };
         return a;
     }
@@ -190,8 +189,7 @@ class CloudClient {
     setCookieMap(a) {
         this.accessToken = a.accesstoken
         this.username = a.account
-        this.password = a.password
-        this.cookieJar = tough_cookie_1.CookieJar.fromJSON(a.cookieJar)
+        this.cookie = a.cookie
     }
 
     // 设置 Cookie 映射
@@ -199,7 +197,7 @@ class CloudClient {
         this.accessToken = null
         this.username = null
         this.password = null
-        this.cookieJar = null
+        this.cookie = null
     }
 
     // 获取用户大小信息
@@ -208,15 +206,15 @@ class CloudClient {
             .get("https://cloud.189.cn/api/portal/getUserSizeInfo.action", {
                 headers: {
                     Accept: "application/json;charset=UTF-8",
+                    cookie: this.cookie
                 },
-                cookieJar: this.cookieJar,
             })
             .json();
     }
 
     async cookie_is_believe() {
         try{
-            await this.getUserSizeInfo()
+            let r = await this.getUserSizeInfo()
             return true
           }catch(e){
             return false
@@ -247,17 +245,19 @@ class CloudClient {
     getUserBriefInfo() {
         return got_1.default
             .get("https://cloud.189.cn/api/portal/v2/getUserBriefInfo.action", {
-                cookieJar: this.cookieJar,
+                headers: {cookie: this.cookie},
             })
             .json();
     }
 
 
     //邀请用户进入家庭云
-    async inviteUserToFamily(account) {
+    async inviteUserToFamily(account,familyId) {
         let url = "https://api.cloud.189.cn/open/family/manage/addMember.action"
-        const { familyInfoResp } = await this.getFamilyList();
-        let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId;
+
+        // const { familyInfoResp } = await this.getFamilyList();
+        // let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId;
+        
         const time = String(Date.now());
         const signature = this._getSignature({
             AccessToken: this.accessToken,
@@ -276,9 +276,9 @@ class CloudClient {
                     signature: signature,
                     timestamp: time,
                     accesstoken: this.accessToken,
+                    cookie: this.cookie
                 },
                 form: payload,
-                cookieJar: this.cookieJar,
             }).then(response => {
                 let out
                 xml2js.parseString(response.body, { explicitArray: false }, (err, result) => {
@@ -288,16 +288,16 @@ class CloudClient {
                     }
                     out = result.inviteUrlResponse.inviteUrl;
                 });
-                return out;
+                return true;
             })
             .catch(error => {
                 console.error('邀请失败:', error.message);
+                return false;
             });
     }
 
     //删除我指定的家庭云成员
     async deleteMyFamilyUser(account) {
-        console.log("asd")
 
         let url = "https://api.cloud.189.cn/open/family/manage/deleteMember.action"
         const { familyInfoResp } = await this.getFamilyList();
@@ -325,18 +325,17 @@ class CloudClient {
                     signature: signature,
                     timestamp: time,
                     accesstoken: this.accessToken,
-                    Accept: "application/json;charset=UTF-8"
+                    Accept: "application/json;charset=UTF-8",
+                    cookie: this.cookie
                 },
                 form: payload,
-                cookieJar: this.cookieJar,
             }).json()
     }
 
     async getMyFamilyUsers(){
         const { familyInfoResp } = await this.getFamilyList();
         let familyId = familyInfoResp.find((f) => f.userRole == 1).familyId;
-        console.error(familyId)
-        console.log(familyId)
+
         const time = String(Date.now());
         let url = `https://api.cloud.189.cn/open/family/manage/getMemberList.action?familyId=${familyId}`
         const signature = this._getSignature({
@@ -351,13 +350,13 @@ class CloudClient {
                     signature: signature,
                     timestamp: time,
                     accesstoken: this.accessToken,
-                    Accept: "application/json;charset=UTF-8"
+                    Accept: "application/json;charset=UTF-8",
+                    cookie: this.cookie
                 },
-                cookieJar: this.cookieJar,
             }).json()
     }
 
-    async addUserToFamily(familyId, invite_account) {//家庭云ID 邀请你的手机号码
+    async addToFamily(familyId, invite_account) {//家庭云ID 邀请你的手机号码
         const time = String(Date.now());
         let url = `https://api.cloud.189.cn/open/family/manage/doAddMember.action?familyId=${familyId}&inviteAccount=${invite_account}&account=${this.username}&date=${time}`
         const signature = this._getSignature({
@@ -375,13 +374,13 @@ class CloudClient {
                     signature: signature,
                     timestamp: time,
                     accesstoken: this.accessToken,
-                    x_request_id: crypto_1.default.randomBytes(16).toString('hex')
+                    x_request_id: crypto_1.default.randomBytes(16).toString('hex'),
+                    cookie: this.cookie
                 },
-                cookieJar: this.cookieJar,
             }).then(res => {
-                return res.statusCode
+                return true
             }).catch((e) => {
-                return res.statusCode
+                return true
             })
     }
 
@@ -401,8 +400,8 @@ class CloudClient {
                     Signature: signature,
                     Timestamp: time,
                     Appkey: appkey,
+                    cookie: this.cookie
                 },
-                cookieJar: this.cookieJar,
             })
             .json();
     }
@@ -420,8 +419,8 @@ class CloudClient {
                     Timestamp: time,
                     Accesstoken: this.accessToken,
                     Accept: "application/json;charset=UTF-8",
+                    cookie: this.cookie
                 },
-                cookieJar: this.cookieJar,
             })
             .json();
     }
